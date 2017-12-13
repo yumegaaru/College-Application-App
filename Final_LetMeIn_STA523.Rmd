@@ -1,0 +1,789 @@
+---
+title: 'Final_Writeup_STA523: LetMeIn'
+author: "YHXLCLWYEL"
+date: "12/12/2017"
+output: rmarkdown::html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE,warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rvest)
+library(magrittr)
+library(stringr)
+library(tibble)
+library(tidyr)
+library(dplyr)
+library(purrr)
+library(readr)
+library(shiny)
+library(shinydashboard)
+library(gridExtra)
+library(ggplot2)
+```
+
+## Overview of LetMeIn
+LetMeIn is a ShinyApp that allows prospective students who want to apply to statistics graduate programs make better and faster decisions about where to apply based on their GPA, GRE scores and citizenship status. Students first select a school they are interested in, and LetMeIn calculates the average scores for accepted, rejected and waitlisted students and compares them to the student's scores. By seeing how their scores stack up, students can quickly determine whether they should apply to their selected school. All estimates are based on entries from thegradcafe.com, a public forum where graduate school applicants share their admissions information and whether they got accepted, rejected or waitlisted. 
+
+This markdown explains the step-by-step process of creating LetMeIn. 
+
+The process included the following steps: 
+1) Scraping the appropriate data on statistics graduate programs from thegradcafe.com to put into a dataframe
+2) Cleaning GRE scores in the dataframe
+3) Cleaning the institution names to standarize them in the dataframe
+4) Scraping Wikipedia for college descriptions and pictures for logos and seals
+5) Generating the ShinyApp using the finalized dataframe from Step 3. 
+
+## Step 1) Scrape data off of thegradcafe.com 
+
+To create a dataframe including the institution name, program, degree, semester applied, student, application status, method of application, date of notification, GPA, and GRE scores, we initiated a dataframe called gradcafe. Next, we scraped the aforementioned elements from thegradcafe.com by identifying them through the selector gadget tool. We used regular expressions to clean the outputs. Moreover, we configured the gradcafe dataframe into a tidy format.
+
+```{r , warning=FALSE}
+## Initiate data frame
+gradcafe = data.frame(matrix(ncol = 13, nrow = 0))
+colnames(gradcafe) = c("institution", "program", "degree","semester","student",
+                       "status", "method", "date", "GPA", "GRE_Subject",
+                       "GRE_General_V","GRE_General_Q", "GRE_General_W")
+
+## Scrape fro thegradcafe.com
+for(i in 1:19) {
+  url = paste("http://thegradcafe.com/survey/index.php?q=statistics&t=a&pp=250&o=&p=",i, sep="")
+  page = read_html(url)
+  institution = page %>% 
+    html_nodes('.instcol') %>% 
+    html_text()%>%
+    str_replace("^\\s+","") %>% 
+    {.[-1]}
+  prog_date = page %>% 
+    html_nodes(".instcol+ td") %>% 
+    html_text() %>% 
+    {.[-1]}
+  program = prog_date %>% 
+    str_extract("^[\\s,\\S]+,") %>% 
+    str_replace_all(",","")
+  degree = prog_date %>% 
+    str_extract("Masters|PhD") %>% 
+    str_extract("\\w+") %>% 
+    ifelse(is.na(.), "Other",.)
+  semester = prog_date %>% 
+    str_extract("(\\S+)$") %>% 
+    str_extract("\\w+")
+  
+  decision = page %>% 
+    html_nodes('td:nth-child(3)') %>% 
+    html_text() %>%
+    {.[-1]} %>%
+    str_split("(\\ via\\ |\\ on\\ |\\ Undergrad GPA:\\ |GRE General \\(V/Q/W\\):\\ |GRE Subject:\\ )")
+  
+  n.obs = sapply(decision, length)
+  seq.max = seq_len(max(n.obs))
+  mat = t(sapply(decision, "[", i = seq.max)) %>%
+    as.data.frame(stringsAsFactors  = FALSE) %>%
+    setNames(c("status", "method", "date", "GPA", "GRE_General", "GRE_Subject")) %>%
+    mutate(GPA = as.numeric(GPA)) %>%
+    mutate(GRE_Subject = as.numeric(str_replace(GRE_Subject, "♦","")))%>%
+    mutate(GRE_General_V = as.numeric(substring(GRE_General,1,3))) %>%
+    mutate(GRE_General_Q = as.numeric(substring(GRE_General,5,7))) %>%
+    mutate(GRE_General_W = as.numeric(substring(GRE_General,9,12))) %>% 
+    mutate(GRE_General = NULL) %>% 
+    mutate(date = as.Date(date, format = "%d %b %Y"))
+  
+  student = page%>%
+    html_nodes('td:nth-child(4)') %>%
+    html_text() %>%
+    {.[-1]} %>% 
+    recode("A" = "American", "U" = "International with US degree", 
+           "I" = "International without US degree",
+           "O" = "Other", "?" = "Unknown") %>% 
+    ifelse(.=="", "Unknown",.)
+  
+  temp = bind_cols(institution = institution, program = program, degree = degree,
+                   semester=semester, student=student) %>% 
+    bind_cols(mat)
+  gradcafe = bind_rows(gradcafe,temp)
+}
+
+## Filter out spring applications 
+## & applications before 2012 or after 2018
+gradcafe = gradcafe %>%
+  filter(!str_detect(semester,"12|S|18"))
+levels(gradcafe$semester) = sapply(c(13:17), function(x) c(paste0("F",x)))
+
+## Save scraped data to gradcafe.Rdata
+save(gradcafe, file = "gradcafe.Rdata")
+```
+
+## Step 2) Clean the GRE scores 
+
+We converted the old GRE scores in the dataset to match the new GRE scoring scale used today. 
+
+```{r , warning=FALSE}
+gre_score = data.frame(prior = seq(800,200,-10),
+           current = c(rep(170,5),rep(169,2),rep(168,2),167,166,rep(165,2),rep(164,2),
+                       163,rep(162,2),161,rep(160,2),159,rep(158,2),157,rep(156,2),155,
+                       rep(154,2),153,rep(152,2),rep(151,2),150,rep(149,2),148,147,
+                       rep(146,2),145,144,rep(143,2),142,141,140,139,138,137,135,134,133,132,
+                       131,rep(130,4)))
+
+gre = vector()
+
+for(i in seq_along(gre_score$prior)){
+  gre[gre_score$prior[i]] = gre_score$current[i]
+}
+
+save(gre, file = "gre_score.Rdata")
+```
+
+## Step 3) Clean the institution names 
+
+Next, we cleaned up the institution names to standardize them. (For example, the Georgia Institute of Technology could have been referred to as GA Tech.) We created a csv file including all the keywords for each institution to detect and rename the same schools under a standardized name. All institutions in our dataset are in the top 75 statistics graduate programs as declared by US News.  
+
+```{r, warning=FALSE}
+###########institution names
+institution = read_csv("School Names - Sheet1.csv", col_names = FALSE)
+names(institution) = c("standard", "abbr")
+institution = institution %>%
+  mutate(
+    abbr = str_replace_all(abbr, "\"", ""),
+    standard = str_replace_all(standard, "\"", "")) %>% 
+  mutate(standard = str_replace_all(standard, "\\[\\d+\\] ","")) %>% 
+  mutate(abbr = str_split(abbr, ","))
+
+inst = data.frame(standard = rep(institution$standard, sapply(institution$abbr, length)), 
+                  abbr = unlist(institution$abbr)) %>%
+  mutate(standard = as.character(standard)) %>%
+  mutate(abbr = toupper(abbr)) %>%
+  mutate(abbr = str_trim(abbr))
+
+###########clean columns except institution
+load(file = "gradcafe.Rdata")
+load(file = "gre_score.Rdata")
+
+cleaned_gradcafe = gradcafe %>%
+  mutate(GRE_Subject = ifelse(GRE_Subject < 100, GRE_Subject*10, GRE_Subject)) %>%
+  mutate(GRE_General_V = ifelse(GRE_General_V < 200, GRE_General_V, gre[GRE_General_V])) %>%
+  mutate(GRE_General_Q = ifelse(GRE_General_Q < 200, GRE_General_Q, gre[GRE_General_Q])) %>%
+  mutate(GRE_General_V = ifelse(GRE_General_V < 130, NA, GRE_General_V)) %>%
+  mutate(GRE_General_Q = ifelse(GRE_General_Q < 130, NA, GRE_General_Q)) %>%
+  mutate(GRE_General_W = ifelse(GRE_General_W == 0, NA, GRE_General_W)) %>%
+  mutate(GRE_General_W = ifelse(GRE_General_W < 1 & GRE_General_W > 0, GRE_General_W*10, GRE_General_W)) %>%
+  filter(GPA <= 4 | is.na(GPA)) %>%
+  filter(GRE_General_V <= 170 | is.na(GRE_General_V)) %>%
+  filter(GRE_General_Q <= 170 | is.na(GRE_General_Q)) %>%
+  filter(GRE_General_W <= 6 | is.na(GRE_General_W))
+
+##########clean institution
+cleaned_gradcafe = cleaned_gradcafe %>%
+  mutate(institution = toupper(institution)) %>%
+  mutate(institution = str_replace_all(institution, "  ", " ")) %>%
+  mutate(institution = str_replace_all(institution, 
+         "(UIVERSITY|UNIVERSTY|UNIVERISTY|UNIVERCITY|UNIVERSIY|
+         UNIVERITY|UNIVERSEITY|UNIVERISITY|UNIERSITY|UNIVERAITY|
+         UNIEVRSITY|UNVERSITY|UNVIERSITY|UNIVESITY)", "UNIVERSITY")) %>%
+  filter(!str_detect(institution, "BRITISH")) %>%
+  mutate(indicator = sapply(institution, function(x) which(str_detect(x,inst$abbr)))) %>%
+  mutate(indicator = sapply(indicator, function(x) ifelse(length(x)==0, NA, min(x)))) %>%
+  mutate(standard = ifelse(is.na(indicator), NA, inst$standard[indicator]))
+
+cleaned_gradcafe = cleaned_gradcafe %>% drop_na(standard)
+
+save(cleaned_gradcafe, file = "cleaned_gradcafe.Rdata")
+```
+
+## Step 4) Scrape Wikipedia for college descriptions and pictures for logos and seals
+
+To include descriptions, logos and seals of the different colleges, we scraped Wikipedia using the selector gadget to identify elements and regular expressions to clean them. 
+
+```{r, warning=FALSE}
+load("cleaned_gradcafe.Rdata")
+college_list = cleaned_gradcafe %>% 
+  dplyr::select(standard) %>% unique() %>%  
+  arrange((standard)) %>% 
+  unname() %>% unlist()
+
+base = "https://en.wikipedia.org/wiki/"
+
+wiki = data.frame(matrix(ncol = 4, nrow = 0))
+colnames(wiki) = c("college", "introduction", "seal_url", "logo_url")
+
+for(i in 1:length(college_list)){
+  college = str_replace_all(college_list[i],"--|—", ", ")
+  college = str_replace_all(college," ", "_")
+  url = paste0(base, college)
+  page = read_html(url)
+  
+  ## Get introduction
+  intro = page %>% html_nodes(".vcard+ p") %>% 
+    html_text() %>% 
+    str_replace_all("\\[\\d+\\]","") %>% 
+    {.[1]}
+  if(is.na(intro)){
+    intro = page %>% html_nodes(".noviewer+ p")  %>% 
+      html_text() %>% 
+      str_replace_all("\\[\\d+\\]","") %>% 
+      {.[1]}
+  }
+  if(is.na(intro)){
+    intro = page %>% html_nodes(".tright+ p")  %>% 
+      html_text() %>% 
+      str_replace_all("\\[\\d+\\]","") %>% 
+      {.[1]}
+  }
+  if(str_detect(intro, "^Coordinates")){
+    intro = page %>% html_nodes("p:nth-child(4) , p:nth-child(3)")  %>% 
+      html_text() %>% 
+      str_replace_all("\\[\\d+\\]","") %>% 
+      paste(., collapse = " ")
+  }
+  
+  ## picture
+  picUrl1 = page %>% html_nodes(".image img") %>% {.[1]} %>% 
+    str_extract('src="[\\s,\\S]+?"') %>% 
+    str_extract('//[\\s,\\S]+.[a-z]+')
+  
+  picUrl2 = page %>% html_nodes(".image img") %>% {.[2]} %>% 
+    str_extract('src="[\\s,\\S]+?"') %>% 
+    str_extract('//[\\s,\\S]+.[a-z]+')
+  
+  temp = bind_cols(college = college_list[i], introduction = intro,
+                   seal_url = picUrl1, logo_url=picUrl2) 
+  wiki = bind_rows(wiki,temp)
+}
+
+save(wiki, file = "wiki.Rdata")
+```
+
+
+## Step 5) Generate the ShinyApp using the finalized dataframe from Step 3. 
+
+Next we created a ShinyApp to configure the data from gradcafe.com into an interactive interface. We added an introduction portion in the app in order to have a brief summary about the university. 
+
+```{r, warning=FALSE}
+load("cleaned_gradcafe.Rdata")
+load("wiki.Rdata")
+
+##########get function
+get_data = function(this_school, this_degree, 
+                    this_student = c("American", "Internation with US degree", 
+                                     "Internation without US degree")) {
+  result = cleaned_gradcafe %>%
+    filter(standard == this_school) %>%
+    filter(degree == this_degree) %>%
+    filter(student %in% this_student) %>%
+    filter(status != "Interview")%>%
+    filter(status != "Other")
+  
+  
+  return(result)
+}
+
+## List of colleges
+college_list = cleaned_gradcafe %>% 
+  dplyr::select(standard) %>% unique() %>%  
+  arrange((standard)) %>% 
+  unname() %>% unlist()
+
+## List of student types
+stu_type_list = cleaned_gradcafe %>% 
+  dplyr::select(student) %>% unique() %>%  
+  arrange((student)) %>% unname() %>% unlist() %>% {.[1:3]}
+
+## Body
+body <- dashboardBody(
+  tabItems(
+    tabItem(tabName = "databoard",
+            ## Row1: info boxes
+            h4("Enrollment Rates:"),
+            fluidRow(
+              infoBoxOutput("acceptRateBox"),
+              infoBoxOutput("waitRateBox"),
+              infoBoxOutput("totalBox")
+            ),
+            
+            h4("GRE Subject Test:"),
+            fluidRow(
+              infoBoxOutput("participantsBox"),
+              infoBoxOutput("avgScoreBox"),
+              infoBoxOutput("rangeScoreBox")
+            ),
+            
+            ## Row2: 2 tabboxes
+            fluidRow(
+              tabBox(
+                title = tagList(shiny::icon("graduation-cap"), "GPA"),
+                selected = "Boxplot",
+                # The id lets us use input$tabset1 on the server to find the current tab
+                id = "tabset1", height = "320px",
+                tabPanel("Boxplot",
+                         uiOutput("GPA")),
+                tabPanel("Lineplot",
+                         uiOutput("GPA_l")),
+                tabPanel("Table", 
+                         tableOutput("GPA_summary"))
+              ),
+              tabBox(
+                title = tagList(shiny::icon("language"), "GRE Verbal"),
+                selected = "Boxplot",
+                height = "320px",
+                tabPanel("Boxplot",
+                         uiOutput("GRE_V")),
+                tabPanel("Lineplot", 
+                         uiOutput("GRE_V_l")),
+                tabPanel("Table",
+                         tableOutput("GRE_V_summary"))
+              )
+            ),
+            
+            ## Row3, 2 tabboxes
+            fluidRow(
+              tabBox(
+                title = tagList(shiny::icon("cubes"), "GRE Quantitative"),
+                selected = "Boxplot",
+                height = "320px",
+                tabPanel("Boxplot",
+                         uiOutput("GRE_Q")),
+                tabPanel("Lineplot",
+                         uiOutput("GRE_Q_l")),
+                tabPanel("Table",
+                         tableOutput("GRE_Q_summary"))
+              ),
+              tabBox(
+                title = tagList(shiny::icon("envelope-open"), "GRE Writing"),
+                selected = "Boxplot",
+                height = "320px",
+                tabPanel("Boxplot",
+                         uiOutput("GRE_W")),
+                tabPanel("Lineplot",
+                         uiOutput("GRE_W_l")),
+                tabPanel("Table",
+                         tableOutput("GRE_W_summary"))
+              )
+            )
+    ),
+    tabItem(tabName = "university",
+            h2("University Introduction"),
+            br(),
+            uiOutput('logo'),
+            br(),
+            htmlOutput('name'),
+            br(),
+            htmlOutput('text'),
+            br(),
+            uiOutput('seal')
+    )
+  )
+)
+
+ui <- dashboardPage(
+  dashboardHeader(title = "College Application"),
+  dashboardSidebar(
+    sidebarMenu(
+      menuItem("Databoard", tabName = "databoard", icon = icon("th")),
+      menuItem("Introduction", icon = icon("envelope-o"), tabName = "university"),
+      
+      ## school input
+      selectInput("school", label = h4("Universities"), 
+                  choices = college_list, selected = "Duke University"),
+      
+      ## program input
+      selectInput("program", label = ("Program"), 
+                  choices = list("Masters", "PhD"), selected = "Masters"),
+      
+      ## scores input
+      checkboxInput("scores","Provide Your Scores?", value = FALSE),
+      conditionalPanel(
+        "input.scores == true",
+        sliderInput("gpa", "GPA", min=1, max=4, value=1,step=0.1),
+        # numericInput("gpa", "GPA", value=0, min=1, max=4),
+        sliderInput("grev", "GRE Verbal", min=130, max=170, value=130,step=1),
+        # numericInput("grev", "GRE Verbal", value=0, min=130, max=170),
+        sliderInput("greq", "GRE Math", min=130, max=170, value=130,step=1),
+        # numericInput("greq", "GRE Math", value=0, min=130, max=170),
+        sliderInput("grew", "GRE Writing", min=1, max=6, value=1,step=0.5)
+        # numericInput("grew", "GRE Writing", value=0, min=1, max=6)
+      ),
+      
+      ## stu_type input
+      checkboxInput("is_type","Specify Student type?", value = FALSE),
+      conditionalPanel(
+        "input.is_type == true",
+        selectInput("stu_type", label = ("Student type"), 
+                    choices = stu_type_list, selected = "American")
+      ),
+      
+      ## action buttion
+      actionButton("find", "Show Magic")
+      
+    )
+  ),
+  body
+)
+
+server <- function(input, output) {
+  output$participantsBox <- renderInfoBox({
+    infoBox(
+      "Participants:", "--%", 
+      icon = icon("id-card-o"), color = "light-blue"
+    )
+  })
+  
+  output$avgScoreBox <- renderInfoBox({
+    infoBox(
+      "Average Score:", "--", 
+      icon = icon("institution"), color = "light-blue"
+    )
+  })
+  
+  output$rangeScoreBox <- renderInfoBox({
+    infoBox(
+      "Score Range:", "-- to --", 
+      icon = icon("database"), color = "light-blue"
+    )
+  })
+  
+  output$acceptRateBox <- renderInfoBox({
+    infoBox(
+      "Accept Rate:", "--%", 
+      icon = icon("trophy"), color = "light-blue"
+    )
+  })
+  
+  output$waitRateBox <- renderInfoBox({
+    infoBox(
+      "Waitlist Rate:", "--%", 
+      icon = icon("question"), color = "light-blue"
+    )
+  })
+  
+  output$totalBox <- renderInfoBox({
+    infoBox(
+      "Applicants Provided:", "--", 
+      icon = icon("users"), color = "light-blue"
+    )
+  })
+  
+  
+  observeEvent(input$find, {
+    
+    ## Get Dataset
+    if(input$is_type){
+      data = get_data(input$school, input$program, input$stu_type)
+    }else{
+      data = get_data(input$school, input$program)
+    }
+    
+    
+    ## Boxplots
+    p1 = ggplot(data %>% filter(!is.na(GPA)), 
+                aes(x = as.factor(status), y = GPA, fill = as.factor(status)))+
+      geom_boxplot()+
+      xlab("Status")+
+      ylab("GPA")+
+      scale_fill_manual(values=c("lightpink", "lightblue", "lightgrey"))+
+      theme_bw()+
+      guides(fill=guide_legend(title="Status"))
+    
+    p2 = ggplot(data %>% filter(!is.na(GRE_General_V)), 
+                aes(x = as.factor(status), y = GRE_General_V, fill = as.factor(status)))+
+      geom_boxplot()+
+      xlab("Status")+
+      ylab("GRE General Verbal")+
+      scale_fill_manual(values=c("lightpink", "lightblue", "lightgrey"))+
+      guides(fill=guide_legend(title=NULL))+
+      theme_bw()
+    
+    p3 = ggplot(data %>% filter(!is.na(GRE_General_Q)), 
+                aes(x = as.factor(status), y = GRE_General_Q, fill = as.factor(status)))+
+      geom_boxplot()+
+      xlab("Status")+
+      ylab("GRE General Quantitative")+
+      scale_fill_manual(values=c("lightpink", "lightblue", "lightgrey"))+
+      guides(fill=guide_legend(title=NULL))+
+      theme_bw()
+    
+    p4 = ggplot(data %>% filter(!is.na(GRE_General_W)), 
+                aes(x = as.factor(status), y = GRE_General_W, fill = as.factor(status)))+
+      geom_boxplot()+
+      xlab("Status")+
+      ylab("GRE General Writing")+
+      scale_fill_manual(values=c("lightpink", "lightblue", "lightgrey"))+
+      guides(fill=guide_legend(title=NULL))+
+      theme_bw()
+    
+    mean.dis = data %>% group_by(semester = as.factor(semester), status = as.factor(status)) %>%
+      summarise(avg.gpa = mean(GPA, na.rm = TRUE),
+                avg.grev = mean(GRE_General_V, na.rm=TRUE),
+                avg.greq = mean(GRE_General_Q, na.rm=TRUE),
+                avg.grew = mean(GRE_General_W, na.rm=TRUE)
+      ) 
+    
+    ## Lineplots
+    p5 = ggplot(mean.dis %>% filter(!is.na(avg.gpa)), 
+                aes(x = semester, y = avg.gpa, color = status, group = status))+
+      geom_line()+
+      scale_color_manual(values=c("lightpink", "lightblue", "lightgrey"))+
+      xlab("Semester")+
+      ylab("Average GPA")+
+      theme_bw()+
+      guides(fill=guide_legend(title="Status"))
+    
+    p6 = ggplot(mean.dis %>% filter(!is.na(avg.grev)), 
+                aes(x = semester, y = avg.grev, color = status, group = status))+
+      geom_line()+
+      scale_color_manual(values=c("lightpink", "lightblue", "lightgrey"))+
+      xlab("Semester")+
+      ylab("Average GRE Verbal")+
+      theme_bw()+
+      guides(fill=guide_legend(title="Status"))
+    
+    p7 = ggplot(mean.dis %>% filter(!is.na(avg.greq)), 
+                aes(x = semester, y = avg.greq, color = status, group = status))+
+      geom_line()+
+      scale_color_manual(values=c("lightpink", "lightblue", "lightgrey"))+
+      xlab("Semester")+
+      ylab("Average GRE Quantitative")+
+      theme_bw()+
+      guides(fill=guide_legend(title="Status"))
+    
+    p8 = ggplot(mean.dis %>% filter(!is.na(avg.grew)), 
+                aes(x = semester, y = avg.grew, color = status, group = status))+
+      geom_line()+
+      scale_color_manual(values=c("lightpink", "lightblue", "lightgrey"))+
+      xlab("Semester")+
+      ylab("Average GRE Writing")+
+      theme_bw()+
+      guides(fill=guide_legend(title="Status"))
+    
+    ## Add lines for "your score"
+    if(input$scores){
+      p1 = p1 + geom_hline(aes(yintercept=input$gpa), colour="#990000")
+      p2 = p2 + geom_hline(aes(yintercept=input$grev), colour="#990000")
+      p3 = p3 + geom_hline(aes(yintercept=input$greq), colour="#990000")
+      p4 = p4 + geom_hline(aes(yintercept=input$grew), colour="#990000")
+      p5 = p5 + geom_hline(aes(yintercept=input$gpa), colour="#990000")
+      p6 = p6 + geom_hline(aes(yintercept=input$grev), colour="#990000")
+      p7 = p7 + geom_hline(aes(yintercept=input$greq), colour="#990000")
+      p8 = p8 + geom_hline(aes(yintercept=input$grew), colour="#990000")
+    }
+    
+    ## Plot outputs
+    
+    output$GPA <- renderUI({
+      if(nrow(data %>% filter(!is.na(GPA)))>0){
+        output$myPlot_GPA <- renderPlot({
+          p1
+        })
+        plotOutput("myPlot_GPA", height = "250px")  
+      }else{
+        img(src = "https://www.anychart.com/products/anychart/history/images/no-data-label.svg", height = "250px", align = "center")
+      }
+    })
+    
+    output$GRE_V <- renderUI({
+      if(nrow(data %>% filter(!is.na(GPA)))>0){
+        output$myPlot_GRE_V <- renderPlot({
+          p2
+        })
+        plotOutput("myPlot_GRE_V", height = "250px")  
+      }else{
+        img(src = "https://www.anychart.com/products/anychart/history/images/no-data-label.svg", height = "250px", align = "center")
+      }
+    })
+    
+    output$GRE_Q <- renderUI({
+      if(nrow(data %>% filter(!is.na(GPA)))>0){
+        output$myPlot_GRE_Q <- renderPlot({
+          p3
+        })
+        plotOutput("myPlot_GRE_Q", height = "250px")  
+      }else{
+        img(src = "https://www.anychart.com/products/anychart/history/images/no-data-label.svg", height = "250px", align = "center")
+      }
+    })
+    
+    output$GRE_W <- renderUI({
+      if(nrow(data %>% filter(!is.na(GPA)))>0){
+        output$myPlot_GRE_W <- renderPlot({
+          p4
+        })
+        plotOutput("myPlot_GRE_W", height = "250px")  
+      }else{
+        img(src = "https://www.anychart.com/products/anychart/history/images/no-data-label.svg", height = "250px", align = "center")
+      }
+    })
+    
+    output$GPA_l <- renderUI({
+      if(nrow(data %>% filter(!is.na(GPA)))>0){
+        output$myPlot_GPA_l <- renderPlot({
+          p5
+        })
+        plotOutput("myPlot_GPA_l", height = "250px")  
+      }else{
+        img(src = "https://www.anychart.com/products/anychart/history/images/no-data-label.svg", height = "250px", align = "center")
+      }
+    })
+    
+    output$GRE_V_l <- renderUI({
+      if(nrow(data %>% filter(!is.na(GPA)))>0){
+        output$myPlot_GRE_V_l <- renderPlot({
+          p6
+        })
+        plotOutput("myPlot_GRE_V_l", height = "250px")  
+      }else{
+        img(src = "https://www.anychart.com/products/anychart/history/images/no-data-label.svg", height = "250px", align = "center")
+      }
+    })
+    
+    output$GRE_Q_l <- renderUI({
+      if(nrow(data %>% filter(!is.na(GPA)))>0){
+        output$myPlot_GRE_Q_l <- renderPlot({
+          p7
+        })
+        plotOutput("myPlot_GRE_Q_l", height = "250px")  
+      }else{
+        img(src = "https://www.anychart.com/products/anychart/history/images/no-data-label.svg", height = "250px", align = "center")
+      }
+    })
+    
+    output$GRE_W_l <- renderUI({
+      if(nrow(data %>% filter(!is.na(GPA)))>0){
+        output$myPlot_GRE_W_l <- renderPlot({
+          p8
+        })
+        plotOutput("myPlot_GRE_W_l", height = "250px")  
+      }else{
+        img(src = "https://www.anychart.com/products/anychart/history/images/no-data-label.svg", height = "250px", align = "center")
+      }
+    })
+    
+    output$GPA_summary <- renderTable(
+      data %>% 
+        group_by(status) %>%
+        summarize(min = min(GPA, na.rm = TRUE), median = median(GPA, na.rm = TRUE), max = max(GPA, na.rm = TRUE)) %>%
+        as.data.frame()
+    )
+    
+    output$GRE_V_summary <- renderTable(
+      data %>% 
+        group_by(status) %>%
+        summarize(min = min(GRE_General_V, na.rm = TRUE), median = median(GRE_General_V, na.rm = TRUE), max = max(GRE_General_V, na.rm = TRUE)) %>%
+        as.data.frame()
+    )
+    
+    output$GRE_Q_summary <- renderTable(
+      data %>% 
+        group_by(status) %>%
+        summarize(min = min(GRE_General_Q, na.rm = TRUE), median = median(GRE_General_Q, na.rm = TRUE), max = max(GRE_General_Q, na.rm = TRUE)) %>%
+        as.data.frame()
+    )
+    
+    output$GRE_W_summary <- renderTable(
+      data %>% 
+        group_by(status) %>%
+        summarize(min = min(GRE_General_W, na.rm = TRUE), median = median(GRE_General_W, na.rm = TRUE), max = max(GRE_General_W, na.rm = TRUE)) %>%
+        as.data.frame()
+    )
+    
+    ## Calculate Gre Subject participant rate, avg score, and accept rate
+    total_df = cleaned_gradcafe %>% 
+      filter(standard==input$school, degree==input$program)
+    if(input$is_type){
+      total_df = total_df %>% filter(student==input$stu_type)
+    }
+    greSubject = total_df %>% 
+      filter(!is.na(GRE_Subject)) %>% 
+      summarize(count = n(), avg = mean(GRE_Subject), 
+                min_score = min(GRE_Subject), max_score = max(GRE_Subject))
+    total_num = total_df %>% nrow()
+    greSub_perc = round((greSubject$count)*100/total_num, digits=2)
+    greSub_perc = ifelse(is.na(greSub_perc), "--", as.character(greSub_perc))
+    greSub_score = ifelse(is.na(greSubject$avg), "--", 
+                          as.character(round(greSubject$avg, digits=2)))
+    greSub_min = ifelse(is.na(greSubject$min_score) | is.infinite(greSubject$min_score), "--", 
+                        as.character(round(greSubject$min_score, digits=2)))
+    greSub_max = ifelse(is.na(greSubject$max_score) | is.infinite(greSubject$max_score), "--", 
+                        as.character(round(greSubject$max_score, digits=2)))
+    accept_num = total_df %>% filter(status=="Accepted") %>% nrow()
+    accept_rate = ifelse(is.na(accept_num/total_num), "--",
+                         as.character(round(accept_num*100/total_num, digits=2)))
+    wait_num = total_df %>% filter(status=="Wait listed") %>% nrow()
+    wait_rate = ifelse(is.na(wait_num/total_num), "--",
+                       as.character(round(wait_num*100/total_num, digits=2)))
+    
+    ## infoBox for Gre subject rate
+    output$participantsBox <- renderInfoBox({
+      infoBox(
+        "Participants:", paste0(greSub_perc, "%"), 
+        icon = icon("id-card-o"), color = "light-blue"
+      )
+    })
+    
+    ## info Box for Gre Subject score
+    output$avgScoreBox <- renderInfoBox({
+      infoBox(
+        "Average Score:", greSub_score, 
+        icon = icon("institution"), color = "light-blue"
+      )
+    })
+    
+    ## info Box for Gre Score Range
+    output$rangeScoreBox <- renderInfoBox({
+      infoBox(
+        "Score Range:", paste0(greSub_min, " to ", greSub_max), 
+        icon = icon("database"), color = "light-blue"
+      )
+    })
+    
+    ## info Box for accept rate
+    output$acceptRateBox <- renderInfoBox({
+      infoBox(
+        "Accept Rate:", paste0(accept_rate, "%"), 
+        icon = icon("trophy"), color = "light-blue"
+      )
+    })
+    
+    ## info Box for waitlist rate
+    output$waitRateBox <- renderInfoBox({
+      infoBox(
+        "Waitlist Rate:", paste0(wait_rate, "%"), 
+        icon = icon("question"), color = "light-blue"
+      )
+    })
+    
+    ## info Box for total number
+    output$totalBox <- renderInfoBox({
+      infoBox(
+        "Applicants Provided:", total_num, 
+        icon = icon("users"), color = "light-blue"
+      )
+    })
+    
+    ## University Introduction
+    intro = wiki %>% filter(college == input$school) %>% 
+      select(introduction) %>% unname() %>% unlist()
+    logo_url = wiki %>% filter(college == input$school) %>% 
+      select(logo_url) %>% unname() %>% unlist()
+    seal_url = wiki %>% filter(college == input$school) %>% 
+      select(seal_url) %>% unname() %>% unlist()
+    school_name = input$school
+    output$name <- renderUI({
+      h4(school_name)
+    })
+    output$text <- renderUI({
+      HTML(intro)
+    })
+    output$logo <- renderUI({
+      img(src = logo_url,
+          align = "center")
+    })
+    output$seal <- renderUI({
+      img(src = seal_url,
+          align = "center")
+    })
+    
+    
+  },ignoreInit = TRUE)
+}
+
+shinyApp(ui, server)
+```
