@@ -38,7 +38,7 @@ The process included the following steps:
 
 To create a dataframe including the institution name, program, degree, semester applied, student, application status, method of application, date of notification, GPA, and GRE scores, we initiated a dataframe called gradcafe. Next, we scraped the aforementioned elements from thegradcafe.com by identifying them through the selector gadget tool. We used regular expressions to clean the outputs. Moreover, we configured the gradcafe dataframe into a tidy format.
 
-```{r , warning=FALSE}
+```{r , warning=FALSE, message=FALSE}
 ## Initiate data frame
 gradcafe = data.frame(matrix(ncol = 13, nrow = 0))
 colnames(gradcafe) = c("institution", "program", "degree","semester","student",
@@ -117,7 +117,7 @@ save(gradcafe, file = "gradcafe.Rdata")
 
 We converted the old GRE scores in the dataset to match the new GRE scoring scale used today. 
 
-```{r , warning=FALSE}
+```{r , warning=FALSE, message=FALSE}
 gre_score = data.frame(prior = seq(800,200,-10),
            current = c(rep(170,5),rep(169,2),rep(168,2),167,166,rep(165,2),rep(164,2),
                        163,rep(162,2),161,rep(160,2),159,rep(158,2),157,rep(156,2),155,
@@ -138,7 +138,7 @@ save(gre, file = "gre_score.Rdata")
 
 Next, we cleaned up the institution names to standardize them. (For example, the Georgia Institute of Technology could have been referred to as GA Tech.) We created a csv file including all the keywords for each institution to detect and rename the same schools under a standardized name. All institutions in our dataset are in the top 75 statistics graduate programs as declared by US News.  
 
-```{r, warning=FALSE}
+```{r, warning=FALSE, message=FALSE}
 ###########institution names
 institution = read_csv("School Names - Sheet1.csv", col_names = FALSE)
 names(institution) = c("standard", "abbr")
@@ -194,7 +194,7 @@ save(cleaned_gradcafe, file = "cleaned_gradcafe.Rdata")
 
 To include descriptions, logos and seals of the different colleges, we scraped Wikipedia using the selector gadget to identify elements and regular expressions to clean them. 
 
-```{r, warning=FALSE}
+```{r, warning=FALSE, message=FALSE}
 load("cleaned_gradcafe.Rdata")
 college_list = cleaned_gradcafe %>% 
   dplyr::select(standard) %>% unique() %>%  
@@ -258,7 +258,7 @@ save(wiki, file = "wiki.Rdata")
 
 Next we created a ShinyApp to configure the data from gradcafe.com into an interactive interface. We added an introduction portion in the app in order to have a brief summary about the university. 
 
-```{r, warning=FALSE}
+```{r, warning=FALSE, message=FALSE}
 load("cleaned_gradcafe.Rdata")
 load("wiki.Rdata")
 
