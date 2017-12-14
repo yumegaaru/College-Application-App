@@ -138,7 +138,7 @@ save(gre, file = "gre_score.Rdata")
 
 Next, we cleaned up the institution names to standardize them. (For example, the Georgia Institute of Technology could have been referred to as GA Tech.) We created a csv file including all the keywords for each institution to detect and rename the same schools under a standardized name. All institutions in our dataset are in the top 75 statistics graduate programs as declared by US News.  
 
-```{r, warning=FALSE}
+```{r, warning=FALSE, message=FALSE}
 ###########institution names
 institution = read_csv("School Names - Sheet1.csv", col_names = FALSE)
 names(institution) = c("standard", "abbr")
