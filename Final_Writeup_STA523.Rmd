@@ -22,7 +22,7 @@ The process included the following steps:
 
 To create a dataframe including the institution name, program, degree, semester applied, student, application status, method of application, date of notification, GPA, and GRE scores, we initiated a dataframe called gradcafe. Next, we scraped the aforementioned elements from thegradcafe.com by identifying them through the selector gadget tool. The data was scraped column by column, splited into different pieces of information, and then stored into `institution`,`prog_date`, `program`, `degree`, `semester` and `decision`.  Then we used regular expressions to clean the outputs, filtered out the unrecognizable characters, and combined all the columns into one `.Rdata` file called `gradcafe.Rdata`. Moreover, we configured the gradcafe dataframe into a tidy format.
 
-```{r , warning=FALSE, echo = FALSE}
+```{r , warning=FALSE, echo = FALSE, message=FALSE}
 library(rvest)
 library(magrittr)
 library(stringr)
@@ -109,7 +109,7 @@ save(gradcafe, file = "gradcafe.Rdata")
 
 In some of the older posts, the GRE scores were in an outdated scale:200-800. In order to analyze them together with the new GRE scores, we converted the old GRE scores in the dataset to match the new scoring scale used today based on the 'convert table' from ETS.  
 
-```{r , warning=FALSE, echo = FALSE}
+```{r , warning=FALSE, echo = FALSE, message=FALSE}
 gre_score = data.frame(prior = seq(800,200,-10),
            current = c(rep(170,5),rep(169,2),rep(168,2),167,166,rep(165,2),rep(164,2),
                        163,rep(162,2),161,rep(160,2),159,rep(158,2),157,rep(156,2),155,
@@ -138,7 +138,7 @@ We then scraped the US_news top Statistics programs and obtained the college nam
 
 Next, we used keyword detection to match institution names in `gradcafe.Rdata` to  standardize their names in the csv file and `us_news.R`. Since many of the posts contains spelling errors, we also tried to capture some of the most commonly mispelled school names such as the word 'university'.
 
-```{r, warning=FALSE, echo = FALSE}
+```{r, warning=FALSE, echo = FALSE, message=FALSE}
 library(readr)
 library(magrittr)
 library(stringr)
@@ -205,7 +205,7 @@ To include descriptions, logos and seals of the different colleges, we scraped W
 
 By pasting college names to the base url of Wikipedia webpage, we scraped the introduction paragraph from the Wikipage of each college. We also extracted the pictures, logos, and seals of that college from the same webpage. We used the selector gadget to identify nodes for each part, then cleaned them with regular expressions. We ended up with a list of introductions, pictures, logos and seals for each school. The results were stored as `wiki.Rdata`. 
 
-```{r, echo = FALSE}
+```{r, echo = FALSE, message=FALSE}
 library(rvest)
 library(magrittr)
 library(stringr)
@@ -297,7 +297,7 @@ Furthermore, American students usually have higher acceptance rates than interna
 Limitations: 
 Even though we have over 4000 data entries, there is insufficient data for some of the colleges. Therefore, it's difficult to run statistical analysis for these schools or draw general conclusions. As more and more posts appear on thegradcafe.com, our app will become increasingly helpful.  
 
-```{r, echo = FALSE}
+```{r, echo = FALSE, message=FALSE}
 library(shiny)
 library(shinydashboard)
 library(gridExtra)
