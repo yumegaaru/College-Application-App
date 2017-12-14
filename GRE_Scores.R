@@ -1,3 +1,11 @@
+library(rvest)
+library(magrittr)
+library(stringr)
+library(tibble)
+library(tidyr)
+library(dplyr)
+library(purrr)
+
 gre_score = data.frame(prior = seq(800,200,-10),
            current = c(rep(170,5),rep(169,2),rep(168,2),167,166,rep(165,2),rep(164,2),
                        163,rep(162,2),161,rep(160,2),159,rep(158,2),157,rep(156,2),155,
