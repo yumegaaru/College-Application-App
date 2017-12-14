@@ -2,13 +2,19 @@ library(shiny)
 library(shinydashboard)
 library(gridExtra)
 library(ggplot2)
+library(stringr)
+library(tibble)
+library(tidyr)
+library(dplyr)
+library(purrr)
+library(readr)
 load("cleaned_gradcafe.Rdata")
 load("wiki.Rdata")
 
 ##########get function
 get_data = function(this_school, this_degree, 
-                    this_student = c("American", "Internation with US degree", 
-                                     "Internation without US degree")) {
+                    this_student = c("American", "International with US degree", 
+                                     "International without US degree")) {
   result = cleaned_gradcafe %>%
     filter(standard == this_school) %>%
     filter(degree == this_degree) %>%

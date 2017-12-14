@@ -1,12 +1,11 @@
 ---
-title: 'Final_Writeup_STA523: LetMeIn'
+title: "Final_Writeup_STA523: LetMeIn"
 author: "YHXLCLWYEL"
 date: "12/12/2017"
-output: rmarkdown::html_document
+output: html_document
 runtime: shiny
 ---
-
-```{r setup, include=FALSE,warning=FALSE}
+```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(rvest)
 library(magrittr)
@@ -36,14 +35,14 @@ The process included the following steps:
 
 ## Step 1) Scrape data off of thegradcafe.com 
 
-To create a dataframe including the institution name, program, degree, semester applied, student, application status, method of application, date of notification, GPA, and GRE scores, we initiated a dataframe called gradcafe. Next, we scraped the aforementioned elements from thegradcafe.com by identifying them through the selector gadget tool. We used regular expressions to clean the outputs. Moreover, we configured the gradcafe dataframe into a tidy format.
+To create a dataframe including the institution name, program, degree, semester applied, student, application status, method of application, date of notification, GPA, and GRE scores, we initiated a dataframe called gradcafe. Next, we scraped the aforementioned elements from thegradcafe.com by identifying them through the selector gadget tool. The data was scraped column by column, splited into different pieces of information, and then stored into `institution`,`prog_date`, `program`, `degree`, `semester` and `decision`.  Then we used regular expressions to clean the outputs, filtered out the unrecognizable characters, and combined all the columns into one `.Rdata` file called `gradcafe.Rdata`. Moreover, we configured the gradcafe dataframe into a tidy format.
 
-```{r , warning=FALSE}
+```{r , warning=FALSE, echo = FALSE, message=FALSE}
 ## Initiate data frame
 gradcafe = data.frame(matrix(ncol = 13, nrow = 0))
 colnames(gradcafe) = c("institution", "program", "degree","semester","student",
-                       "status", "method", "date", "GPA", "GRE_Subject",
-                       "GRE_General_V","GRE_General_Q", "GRE_General_W")
+                       "status", "method", "date", "GPA", "GRE_Subject", "GRE_General_V",
+                       "GRE_General_Q", "GRE_General_W")
 
 ## Scrape fro thegradcafe.com
 for(i in 1:19) {
@@ -113,11 +112,11 @@ levels(gradcafe$semester) = sapply(c(13:17), function(x) c(paste0("F",x)))
 save(gradcafe, file = "gradcafe.Rdata")
 ```
 
-## Step 2) Clean the GRE scores 
+## Step 2) Convert the GRE scores 
 
-We converted the old GRE scores in the dataset to match the new GRE scoring scale used today. 
+In some of the older posts, the GRE scores were in an outdated scale:200-800. In order to analyze them together with the new GRE scores, we converted the old GRE scores in the dataset to match the new scoring scale used today based on the 'convert table' from ETS.  
 
-```{r , warning=FALSE}
+```{r , warning=FALSE, echo = FALSE, message=FALSE}
 gre_score = data.frame(prior = seq(800,200,-10),
            current = c(rep(170,5),rep(169,2),rep(168,2),167,166,rep(165,2),rep(164,2),
                        163,rep(162,2),161,rep(160,2),159,rep(158,2),157,rep(156,2),155,
@@ -134,11 +133,19 @@ for(i in seq_along(gre_score$prior)){
 save(gre, file = "gre_score.Rdata")
 ```
 
-## Step 3) Clean the institution names 
+## Step 3) Clean the institution names and gre scores
 
-Next, we cleaned up the institution names to standardize them. (For example, the Georgia Institute of Technology could have been referred to as GA Tech.) We created a csv file including all the keywords for each institution to detect and rename the same schools under a standardized name. All institutions in our dataset are in the top 75 statistics graduate programs as declared by US News.  
+Next, we cleaned up the institution names to standardize them. (For example, the Georgia Institute of Technology could have been referred to as GA Tech.) 
 
-```{r, warning=FALSE, message=FALSE}
+To clean the GRE scores, we set up conditions to omit out-of-range scores in `gradcafe.Rdata`.
+
+To clean the institution names, we created a csv file including all the keywords for each institution to detect and rename the same schools under a standardized name. The `School Names - Sheet1.csv` file is a google spreadsheet that contains the names of the most common schools in the gradcafe dataset in one column and all the key words we used to detect their names in a subsequent column. The schools in our csv files cover the top 75 statistics programs declared by US_news, as well as some other popular schools that we found in the gradcafe dataset.
+
+We then scraped the US_news top Statistics programs and obtained the college names, locations, rank and average scores. The final results are stored in `us_news.R`, which helped us clean the institution names.
+
+Next, we used keyword detection to match institution names in `gradcafe.Rdata` to  standardize their names in the csv file and `us_news.R`. Since many of the posts contains spelling errors, we also tried to capture some of the most commonly mispelled school names such as the word 'university'.
+
+```{r, warning=FALSE, echo = FALSE, message=FALSE}
 ###########institution names
 institution = read_csv("School Names - Sheet1.csv", col_names = FALSE)
 names(institution) = c("standard", "abbr")
@@ -192,9 +199,11 @@ save(cleaned_gradcafe, file = "cleaned_gradcafe.Rdata")
 
 ## Step 4) Scrape Wikipedia for college descriptions and pictures for logos and seals
 
-To include descriptions, logos and seals of the different colleges, we scraped Wikipedia using the selector gadget to identify elements and regular expressions to clean them. 
+To include descriptions, logos and seals of the different colleges, we scraped Wikipedia for each college listed in the `cleaned_gradcafe.Rdata`
 
-```{r, warning=FALSE}
+By pasting college names to the base url of Wikipedia webpage, we scraped the introduction paragraph from the Wikipage of each college. We also extracted the pictures, logos, and seals of that college from the same webpage. We used the selector gadget to identify nodes for each part, then cleaned them with regular expressions. We ended up with a list of introductions, pictures, logos and seals for each school. The results were stored as `wiki.Rdata`. 
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
 load("cleaned_gradcafe.Rdata")
 college_list = cleaned_gradcafe %>% 
   dplyr::select(standard) %>% unique() %>%  
@@ -254,18 +263,38 @@ save(wiki, file = "wiki.Rdata")
 ```
 
 
-## Step 5) Generate the ShinyApp using the finalized dataframe from Step 3. 
+## Step 5) Generate the ShinyApp and Discussion 
 
-Next we created a ShinyApp to configure the data from gradcafe.com into an interactive interface. We added an introduction portion in the app in order to have a brief summary about the university. 
+We created a ShinyApp to configure the data from gradcafe.com into an interactive interface. We added an introduction portion in the app in order to have a brief summary about the university. The app was built with the `shinydashboard` package.
 
-```{r, warning=FALSE}
+The user interface includes following features:
+i. a drop-down menu of a list of institutions from `cleaned_gradcafe.Rdata`
+ii. a drop-down menu of programs including two options: `PhD` and `Masters`
+iii. a check box: 'Provide Your Scores?': If checked, four slidebars will appear for users to input their own GPA, and GRE Verbal/Math/Writing scores.
+iv. a check box: 'Specify Student Type?': If checked, users can see the results of only American students, international students or international students with US degrees. 
+v. introduction button: if clicked, the introduction for the specified school will be displayed.
+
+The main panel will output the following information:
+i. Boxplots, lineplots and tables for GPA and GRE V/M/Q scores
+ii. Enrollment rates for students who were accepted, rejected, and waitlisted
+iii. Statistics for GRE subject test results
+
+
+Discussion:
+The app showed some interesting findings. We found that different schools focused on different scores. Harvard, for example, seems to prefer students with high GRE verbal and writing scores. On the contrary, Duke focuses more on quantitative scores.
+Furthermore, American students usually have higher acceptance rates than international students. However, this may be due to the fact that there are much more international students who apply for graduate statistics programs than American students.
+
+Limitations: 
+Even though we have over 4000 data entries, there is insufficient data for some of the colleges. Therefore, it's difficult to run statistical analysis for these schools or draw general conclusions. As more and more posts appear on thegradcafe.com, our app will become increasingly helpful.  
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
 load("cleaned_gradcafe.Rdata")
 load("wiki.Rdata")
 
 ##########get function
 get_data = function(this_school, this_degree, 
-                    this_student = c("American", "Internation with US degree", 
-                                     "Internation without US degree")) {
+                    this_student = c("American", "International with US degree", 
+                                     "International without US degree")) {
   result = cleaned_gradcafe %>%
     filter(standard == this_school) %>%
     filter(degree == this_degree) %>%
@@ -787,3 +816,4 @@ server <- function(input, output) {
 
 shinyApp(ui, server)
 ```
+
